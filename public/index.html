@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Stripe Terminal</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      text-align: center;
+      margin-top: 50px;
+    }
+    input, button {
+      margin: 10px;
+      padding: 10px;
+      font-size: 16px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Stripe Terminal</h1>
+  <div>
+    <input type="text" id="firstName" placeholder="First Name">
+    <input type="text" id="lastName" placeholder="Last Name">
+  </div>
+  <div>
+    <input type="number" id="amount" placeholder="Enter amount">
+  </div>
+  <div>
+    <button id="discoverButton">Discover Readers</button>
+    <button id="takePaymentButton" disabled>Take Payment</button>
+    <button id="cancelTransactionButton" disabled>Cancel Transaction</button>
+  </div>
+  <div id="message"></div>
+  <script src="https://js.stripe.com/v3/"></script>
+  <script src="https://js.stripe.com/terminal/v1/"></script>
+  <script>
+    const terminal = StripeTerminal.create({
+      onFetchConnectionToken: async () => {
+        try {
+          const response = await fetch('/connection_token', { method: 'POST' });
+          const data = await response.json();
+          return data.secret;
+        } catch (error) {
+          console.error('Failed to fetch connection token:', error);
+          throw error;
+        }
+      },
+      onUnexpectedReaderDisconnect: () => {
+        console.error('Unexpected reader disconnect');
+      },
+    });
+
+    let reader;
+
+    document.getElementById('discoverButton').addEventListener('click', async () => {
+      const discoverResult = await terminal.discoverReaders();
+      if (discoverResult.error) {
+        console.error('Failed to discover readers:', discoverResult.error);
+        document.getElementById('message').innerText = 'Failed to discover readers.';
+      } else if (discoverResult.discoveredReaders.length === 0) {
+        console.log('No available readers.');
+        document.getElementById('message').innerText = 'No available readers.';
+      } else {
+        reader = discoverResult.discoveredReaders[0];
+        const connectResult = await terminal.connectReader(reader);
+        if (connectResult.error) {
+          console.error('Failed to connect to reader:', connectResult.error);
+          document.getElementById('message').innerText = 'Failed to connect to reader.';
+        } else {
+          console.log('Connected to reader:', connectResult.reader.label);
+          document.getElementById('message').innerText = `Connected to reader: ${connectResult.reader.label}`;
+          document.getElementById('takePaymentButton').disabled = false;
+          document.getElementById('cancelTransactionButton').disabled = false;
+        }
+      }
+    });
+
+    document.getElementById('takePaymentButton').addEventListener('click', async () => {
+      const amount = parseFloat(document.getElementById('amount').value) * 100;
+      const firstName = document.getElementById('firstName').value;
+      const lastName = document.getElementById('lastName').value;
+
+      if (isNaN(amount) || amount <= 0) {
+        document.getElementById('message').innerText = 'Please enter a valid amount.';
+        return;
+      }
+
+      if (!firstName || !lastName) {
+        document.getElementById('message').innerText = 'Please enter both first and last names.';
+        return;
+      }
+
+      const paymentIntentResponse = await fetch('/create_payment_intent', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ amount, currency: 'usd', description: `Payment by ${firstName} ${lastName}` }),
+      });
+
+      const paymentIntent = await paymentIntentResponse.json();
+
+      const { error } = await terminal.collectPaymentMethod(paymentIntent.client_secret);
+      if (error) {
+        console.error('Failed to collect payment method:', error);
+        document.getElementById('message').innerText = 'Failed to collect payment method.';
+        return;
+      }
+
+      const { error: processError } = await terminal.processPayment(paymentIntent.client_secret);
+      if (processError) {
+        console.error('Failed to process payment:', processError);
+        document.getElementById('message').innerText = 'Failed to process payment.';
+        return;
+      }
+
+      const captureResponse = await fetch('/capture_payment_intent', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ paymentIntentId: paymentIntent.id }),
+      });
+
+      const captureResult = await captureResponse.json();
+      if (captureResult.error) {
+        console.error('Failed to capture payment:', captureResult.error);
+        document.getElementById('message').innerText = 'Failed to capture payment.';
+      } else {
+        console.log('Payment successful:', captureResult);
+        document.getElementById('message').innerText = 'Payment successful!';
+        document.getElementById('amount').value = '';
+        document.getElementById('firstName').value = '';
+        document.getElementById('lastName').value = '';
+      }
+    });
+
+    document.getElementById('cancelTransactionButton').addEventListener('click', async () => {
+      const { error } = await terminal.cancelCollectPaymentMethod();
+      if (error) {
+        console.error('Failed to cancel transaction:', error);
+        document.getElementById('message').innerText = 'Failed to cancel transaction.';
+      } else {
+        console.log('Transaction canceled.');
+        document.getElementById('message').innerText = 'Transaction canceled.';
+      }
+    });
+  </script>
+</body>
+</html>

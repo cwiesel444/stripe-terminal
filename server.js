@@ -1,17 +1,17 @@
 require('dotenv').config();
 const express = require('express');
 const path = require('path');
-const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
+const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY || 'fallback_stripe_key'); // Add fallback key for testing
 
 const app = express();
 app.use(express.json());
 
-// Serve static files
-app.use(express.static(path.join(__dirname)));
+// Serve static files from the "public" directory
+app.use(express.static(path.join(__dirname, 'public')));
 
-// Serve index.html at the root
+// Serve the main index.html file
 app.get('/', (req, res) => {
-    res.sendFile(path.join(__dirname, 'index.html'));
+    res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
 // Endpoint to create a connection token
@@ -20,8 +20,8 @@ app.post('/connection_token', async (req, res) => {
         const connectionToken = await stripe.terminal.connectionTokens.create();
         res.json({ secret: connectionToken.secret });
     } catch (error) {
-        console.error(error);
-        res.status(500).send('Error creating connection token');
+        console.error('Error creating connection token:', error);
+        res.status(500).json({ error: 'Error creating connection token' });
     }
 });
 
@@ -32,12 +32,12 @@ app.post('/create_payment_intent', async (req, res) => {
             amount: req.body.amount, // Amount in cents
             currency: 'usd',
             payment_method_types: ['card_present'],
-            capture_method: 'manual', // Capture manually for card_present payments
+            capture_method: 'manual', // Manual capture for card_present
         });
         res.json(paymentIntent);
     } catch (error) {
-        console.error(error);
-        res.status(500).send('Error creating PaymentIntent');
+        console.error('Error creating PaymentIntent:', error);
+        res.status(500).json({ error: 'Error creating PaymentIntent' });
     }
 });
 
@@ -47,8 +47,8 @@ app.post('/capture_payment_intent', async (req, res) => {
         const paymentIntent = await stripe.paymentIntents.capture(req.body.payment_intent_id);
         res.json(paymentIntent);
     } catch (error) {
-        console.error(error);
-        res.status(500).send('Error capturing PaymentIntent');
+        console.error('Error capturing PaymentIntent:', error);
+        res.status(500).json({ error: 'Error capturing PaymentIntent' });
     }
 });
 
