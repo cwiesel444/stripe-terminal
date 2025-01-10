@@ -27,6 +27,9 @@
     <input type="number" id="amount" placeholder="Enter amount">
   </div>
   <div>
+    <input type="text" id="notes" placeholder="Transaction Notes (optional)">
+  </div>
+  <div>
     <button id="discoverButton">Discover Readers</button>
     <button id="takePaymentButton" disabled>Take Payment</button>
     <button id="cancelTransactionButton" disabled>Cancel Transaction</button>
@@ -53,33 +56,42 @@
 
     let reader;
 
+    // Discover readers and connect
     document.getElementById('discoverButton').addEventListener('click', async () => {
-      const discoverResult = await terminal.discoverReaders();
+      const discoverResult = await terminal.discoverReaders({
+        device_type: 'bbpos_wisepos_e',
+        method: 'internet',
+        simulated: false
+      });
+
+      const messageElement = document.getElementById('message');
       if (discoverResult.error) {
         console.error('Failed to discover readers:', discoverResult.error);
-        document.getElementById('message').innerText = 'Failed to discover readers.';
+        messageElement.innerText = 'Failed to discover readers.';
       } else if (discoverResult.discoveredReaders.length === 0) {
         console.log('No available readers.');
-        document.getElementById('message').innerText = 'No available readers.';
+        messageElement.innerText = 'No available readers.';
       } else {
         reader = discoverResult.discoveredReaders[0];
         const connectResult = await terminal.connectReader(reader);
         if (connectResult.error) {
           console.error('Failed to connect to reader:', connectResult.error);
-          document.getElementById('message').innerText = 'Failed to connect to reader.';
+          messageElement.innerText = 'Failed to connect to reader.';
         } else {
           console.log('Connected to reader:', connectResult.reader.label);
-          document.getElementById('message').innerText = `Connected to reader: ${connectResult.reader.label}`;
+          messageElement.innerText = `Connected to reader: ${connectResult.reader.label}`;
           document.getElementById('takePaymentButton').disabled = false;
           document.getElementById('cancelTransactionButton').disabled = false;
         }
       }
     });
 
+    // Take payment
     document.getElementById('takePaymentButton').addEventListener('click', async () => {
       const amount = parseFloat(document.getElementById('amount').value) * 100;
       const firstName = document.getElementById('firstName').value;
       const lastName = document.getElementById('lastName').value;
+      const notes = document.getElementById('notes').value;
 
       if (isNaN(amount) || amount <= 0) {
         document.getElementById('message').innerText = 'Please enter a valid amount.';
@@ -94,7 +106,11 @@
       const paymentIntentResponse = await fetch('/create_payment_intent', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ amount, currency: 'usd', description: `Payment by ${firstName} ${lastName}` }),
+        body: JSON.stringify({
+          amount,
+          currency: 'usd',
+          description: `Payment by ${firstName} ${lastName} - ${notes || 'No additional notes'}`,
+        }),
       });
 
       const paymentIntent = await paymentIntentResponse.json();
@@ -129,17 +145,31 @@
         document.getElementById('amount').value = '';
         document.getElementById('firstName').value = '';
         document.getElementById('lastName').value = '';
+        document.getElementById('notes').value = '';
       }
     });
 
+    // Cancel transaction
     document.getElementById('cancelTransactionButton').addEventListener('click', async () => {
-      const { error } = await terminal.cancelCollectPaymentMethod();
-      if (error) {
-        console.error('Failed to cancel transaction:', error);
-        document.getElementById('message').innerText = 'Failed to cancel transaction.';
-      } else {
-        console.log('Transaction canceled.');
-        document.getElementById('message').innerText = 'Transaction canceled.';
+      const confirmCancel = confirm('Are you sure you want to cancel the transaction?');
+      if (!confirmCancel) return;
+
+      try {
+        const { error } = await terminal.cancelCollectPaymentMethod();
+        if (error) {
+          console.error('Failed to cancel transaction:', error);
+          document.getElementById('message').innerText = 'Failed to cancel transaction.';
+        } else {
+          console.log('Transaction canceled.');
+          document.getElementById('message').innerText = 'Transaction canceled.';
+          document.getElementById('amount').value = '';
+          document.getElementById('firstName').value = '';
+          document.getElementById('lastName').value = '';
+          document.getElementById('notes').value = '';
+        }
+      } catch (error) {
+        console.error('Error during cancellation:', error);
+        document.getElementById('message').innerText = 'Error during cancellation.';
       }
     });
   </script>
