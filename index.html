@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Stripe Terminal</title>
+    <script src="https://js.stripe.com/terminal/v1/"></script>
+</head>
+<body>
+    <h1>Stripe Terminal</h1>
+    <button id="discover">Discover Readers</button>
+    <div style="margin-top: 20px;">
+        <label for="amount">Charge Amount ($):</label>
+        <input type="number" id="amount" placeholder="Enter amount" />
+        <button id="take-payment" style="display:inline;">Take Payment</button>
+        <button id="cancel-transaction" style="display:inline;">Cancel Transaction</button>
+    </div>
+    <p id="status"></p>
+    <script>
+        const terminal = StripeTerminal.create({
+            onFetchConnectionToken: async () => {
+                const response = await fetch('http://localhost:3000/connection_token', { method: 'POST' });
+                if (!response.ok) {
+                    throw new Error(`Failed to fetch connection token: ${response.statusText}`);
+                }
+                const data = await response.json();
+                return data.secret;
+            },
+            onUnexpectedReaderDisconnect: () => {
+                alert('Reader disconnected unexpectedly. Please reconnect.');
+            },
+        });
+
+        // Discover readers and connect
+        document.getElementById('discover').addEventListener('click', async () => {
+            const result = await terminal.discoverReaders({
+                device_type: 'bbpos_wisepos_e',
+                method: 'internet',
+                simulated: false,
+            });
+
+            const statusElement = document.getElementById('status');
+            if (result.error) {
+                statusElement.textContent = `Error: ${result.error.message}`;
+            } else if (result.discoveredReaders.length === 0) {
+                statusElement.textContent = `No readers found.`;
+            } else {
+                statusElement.textContent = `Readers found: ${result.discoveredReaders.length}`;
+                const reader = result.discoveredReaders[0];
+                const connectResult = await terminal.connectReader(reader);
+                if (connectResult.error) {
+                    statusElement.textContent = `Error connecting to reader: ${connectResult.error.message}`;
+                } else {
+                    statusElement.textContent = `Connected to reader: ${reader.label}`;
+                }
+            }
+        });
+
+        // Take payment
+        document.getElementById('take-payment').addEventListener('click', async () => {
+            const statusElement = document.getElementById('status');
+            const amountInput = document.getElementById('amount').value;
+
+            if (!amountInput || isNaN(amountInput) || amountInput <= 0) {
+                statusElement.textContent = 'Please enter a valid amount.';
+                return;
+            }
+
+            statusElement.textContent = 'Processing payment...';
+
+            try {
+                const paymentIntentResponse = await fetch('/create_payment_intent', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ amount: Math.round(amountInput * 100) }), // Convert dollars to cents
+                });
+
+                const paymentIntent = await paymentIntentResponse.json();
+                const collectResult = await terminal.collectPaymentMethod(paymentIntent.client_secret);
+
+                if (collectResult.error) {
+                    statusElement.textContent = `Payment failed during collection: ${collectResult.error.message}`;
+                    return;
+                }
+
+                const processResult = await terminal.processPayment(collectResult.paymentIntent);
+
+                if (processResult.error) {
+                    statusElement.textContent = `Payment failed during processing: ${processResult.error.message}`;
+                } else if (processResult.paymentIntent.status === 'requires_capture') {
+                    statusElement.textContent = 'Payment successful! Capturing...';
+
+                    const captureResponse = await fetch('/capture_payment_intent', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ payment_intent_id: processResult.paymentIntent.id }),
+                    });
+
+                    if (captureResponse.ok) {
+                        statusElement.textContent = 'Payment captured successfully!';
+                        resetAmount();
+                    } else {
+                        statusElement.textContent = 'Payment capture failed!';
+                    }
+                }
+            } catch (error) {
+                statusElement.textContent = `Error: ${error.message}`;
+            }
+        });
+
+        // Cancel transaction
+        document.getElementById('cancel-transaction').addEventListener('click', async () => {
+            const statusElement = document.getElementById('status');
+
+            // Display confirmation popup
+            const confirmCancel = confirm('Are you sure you want to cancel the transaction?');
+            if (!confirmCancel) {
+                return;
+            }
+
+            try {
+                await terminal.clearReaderDisplay();
+                statusElement.textContent = 'Transaction cleared from reader.';
+                resetAmount();
+            } catch (error) {
+                statusElement.textContent = `Failed to clear transaction: ${error.message}`;
+            }
+        });
+
+        // Reset the input field after canceling or completing a transaction
+        function resetAmount() {
+            document.getElementById('amount').value = '';
+        }
+    </script>
+</body>
+</html>
