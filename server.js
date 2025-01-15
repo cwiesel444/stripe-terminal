@@ -67,6 +67,25 @@ app.post('/capture_payment_intent', async (req, res) => {
         });
     }
 });
+// Endpoint to confirm a PaymentIntent with a payment method
+app.post('/confirm_payment_intent', async (req, res) => {
+    try {
+        const { payment_intent_id, payment_method } = req.body;
+
+        const paymentIntent = await stripe.paymentIntents.confirm(payment_intent_id, {
+            payment_method: payment_method, // The payment method to attach
+        });
+
+        res.json(paymentIntent);
+    } catch (error) {
+        console.error('Error confirming PaymentIntent:', error.message, error.code);
+        res.status(500).json({
+            error: 'Error confirming PaymentIntent',
+            message: error.message,
+            code: error.code,
+        });
+    }
+});
 
 // Start the server
 const PORT = process.env.PORT || 3000;
