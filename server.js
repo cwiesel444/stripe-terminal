@@ -1,9 +1,13 @@
 require('dotenv').config();
 const express = require('express');
 const path = require('path');
+const cors = require('cors'); // Import the cors package
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY || 'fallback_stripe_key'); // Fallback key for testing
 
 const app = express();
+
+// Add CORS configuration
+app.use(cors());
 app.use(express.json());
 
 // Serve static files from the "public" directory
