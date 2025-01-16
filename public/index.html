@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="font-src 'self' data:;">
   <title>Stripe Terminal</title>
   <style>
     body {
@@ -58,95 +59,102 @@
 
     // Discover readers and connect
     document.getElementById('discoverButton').addEventListener('click', async () => {
-      const discoverResult = await terminal.discoverReaders({
-        device_type: 'bbpos_wisepos_e',
-        method: 'internet',
-        simulated: false
-      });
+      try {
+        console.log('Starting reader discovery in simulated mode...');
+        const discoverResult = await terminal.discoverReaders({
+          device_type: 'bbpos_wisepos_e',
+          method: 'internet',
+          simulated: true // Simulated mode enabled
+        });
 
-      const messageElement = document.getElementById('message');
-      if (discoverResult.error) {
-        console.error('Failed to discover readers:', discoverResult.error);
-        messageElement.innerText = 'Failed to discover readers.';
-      } else if (discoverResult.discoveredReaders.length === 0) {
-        console.log('No available readers.');
-        messageElement.innerText = 'No available readers.';
-      } else {
-        reader = discoverResult.discoveredReaders[0];
-        const connectResult = await terminal.connectReader(reader);
-        if (connectResult.error) {
-          console.error('Failed to connect to reader:', connectResult.error);
-          messageElement.innerText = 'Failed to connect to reader.';
+        console.log('Discover result:', discoverResult);
+
+        const messageElement = document.getElementById('message');
+        if (discoverResult.error) {
+          console.error('Failed to discover readers:', discoverResult.error);
+          messageElement.innerText = `Failed to discover readers: ${discoverResult.error.message}`;
+        } else if (discoverResult.discoveredReaders.length === 0) {
+          console.log('No available readers in simulated mode.');
+          messageElement.innerText = 'No available readers in simulated mode.';
         } else {
-          console.log('Connected to reader:', connectResult.reader.label);
-          messageElement.innerText = `Connected to reader: ${connectResult.reader.label}`;
-          document.getElementById('takePaymentButton').disabled = false;
-          document.getElementById('cancelTransactionButton').disabled = false;
+          console.log('Discovered readers:', discoverResult.discoveredReaders);
+          reader = discoverResult.discoveredReaders[0];
+
+          console.log(`Attempting to connect to reader: ${reader.label}`);
+          const connectResult = await terminal.connectReader(reader);
+          console.log('Connect result:', connectResult);
+
+          if (connectResult.error) {
+            console.error('Failed to connect to reader:', connectResult.error);
+            messageElement.innerText = `Failed to connect to reader: ${connectResult.error.message}`;
+          } else {
+            console.log('Connected to reader:', connectResult.reader.label);
+            messageElement.innerText = `Connected to reader: ${connectResult.reader.label}`;
+            document.getElementById('takePaymentButton').disabled = false;
+            document.getElementById('cancelTransactionButton').disabled = false;
+          }
         }
+      } catch (error) {
+        console.error('Unexpected error during reader discovery or connection:', error);
+        document.getElementById('message').innerText = 'Unexpected error during reader discovery or connection.';
       }
     });
 
     // Take payment
     document.getElementById('takePaymentButton').addEventListener('click', async () => {
-      const amount = parseFloat(document.getElementById('amount').value) * 100;
-      const firstName = document.getElementById('firstName').value;
-      const lastName = document.getElementById('lastName').value;
-      const notes = document.getElementById('notes').value;
+        const amount = parseFloat(document.getElementById('amount').value) * 100; // Convert to cents
+        const firstName = document.getElementById('firstName').value;
+        const lastName = document.getElementById('lastName').value;
+        const notes = document.getElementById('notes').value;
 
-      if (isNaN(amount) || amount <= 0) {
-        document.getElementById('message').innerText = 'Please enter a valid amount.';
-        return;
-      }
+        if (isNaN(amount) || amount <= 0) {
+            document.getElementById('message').innerText = 'Please enter a valid amount.';
+            return;
+        }
 
-      if (!firstName || !lastName) {
-        document.getElementById('message').innerText = 'Please enter both first and last names.';
-        return;
-      }
+        if (!firstName || !lastName) {
+            document.getElementById('message').innerText = 'Please enter both first and last names.';
+            return;
+        }
 
-      const paymentIntentResponse = await fetch('/create_payment_intent', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          amount,
-          currency: 'usd',
-          description: `Payment by ${firstName} ${lastName} - ${notes || 'No additional notes'}`,
-        }),
-      });
+        try {
+            console.log('Creating PaymentIntent with amount:', amount);
 
-      const paymentIntent = await paymentIntentResponse.json();
+            const paymentIntentResponse = await fetch('/create_payment_intent', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    amount,
+                    currency: 'usd',
+                    description: `Payment by ${firstName} ${lastName} - ${notes || 'No additional notes'}`,
+                }),
+            });
 
-      const { error } = await terminal.collectPaymentMethod(paymentIntent.client_secret);
-      if (error) {
-        console.error('Failed to collect payment method:', error);
-        document.getElementById('message').innerText = 'Failed to collect payment method.';
-        return;
-      }
+            const paymentIntent = await paymentIntentResponse.json();
+            console.log('Received PaymentIntent:', paymentIntent);
 
-      const { error: processError } = await terminal.processPayment(paymentIntent.client_secret);
-      if (processError) {
-        console.error('Failed to process payment:', processError);
-        document.getElementById('message').innerText = 'Failed to process payment.';
-        return;
-      }
+            const { error } = await terminal.collectPaymentMethod(paymentIntent.client_secret);
+            if (error) {
+                console.error('Error collecting payment method:', error.message, error.code);
+                document.getElementById('message').innerText = `Error collecting payment method: ${error.message}`;
+                return;
+            }
 
-      const captureResponse = await fetch('/capture_payment_intent', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ paymentIntentId: paymentIntent.id }),
-      });
+            console.log('Payment method collected. Processing payment...');
 
-      const captureResult = await captureResponse.json();
-      if (captureResult.error) {
-        console.error('Failed to capture payment:', captureResult.error);
-        document.getElementById('message').innerText = 'Failed to capture payment.';
-      } else {
-        console.log('Payment successful:', captureResult);
-        document.getElementById('message').innerText = 'Payment successful!';
-        document.getElementById('amount').value = '';
-        document.getElementById('firstName').value = '';
-        document.getElementById('lastName').value = '';
-        document.getElementById('notes').value = '';
-      }
+            const { error: processError } = await terminal.processPayment(paymentIntent.client_secret);
+            if (processError) {
+                console.error('Error processing payment:', processError.message, processError.code);
+                document.getElementById('message').innerText = `Error processing payment: ${processError.message}`;
+                return;
+            }
+
+            console.log('Payment successful!');
+            document.getElementById('message').innerText = 'Payment successful!';
+        } catch (error) {
+            console.error('Unexpected error during payment:', error);
+            document.getElementById('message').innerText = 'Unexpected error during payment.';
+        }
     });
 
     // Cancel transaction

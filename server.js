@@ -19,14 +19,25 @@ app.get('/', (req, res) => {
 });
 
 // Endpoint to create a connection token
-app.post('/connection_token', async (req, res) => {
+app.post('/create_payment_intent', async (req, res) => {
     try {
-        const connectionToken = await stripe.terminal.connectionTokens.create();
-        res.json({ secret: connectionToken.secret });
+        console.log('Creating PaymentIntent with:', req.body);
+
+        const paymentIntent = await stripe.paymentIntents.create({
+            amount: req.body.amount, // Amount in cents
+            currency: 'usd',
+            payment_method_types: ['card_present'], // Ensure card_present is included
+            capture_method: 'manual', // Manual capture for card_present
+            description: req.body.description || 'Stripe Terminal Payment',
+        });
+
+        console.log('Created PaymentIntent:', paymentIntent);
+
+        res.json(paymentIntent);
     } catch (error) {
-        console.error('Error creating connection token:', error.message, error.code);
+        console.error('Error creating PaymentIntent:', error.message, error.code);
         res.status(500).json({
-            error: 'Error creating connection token',
+            error: 'Error creating PaymentIntent',
             message: error.message,
             code: error.code,
         });
