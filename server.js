@@ -100,4 +100,17 @@ app.post('/confirm_payment_intent', async (req, res) => {
 
 // Start the server
 const PORT = process.env.PORT || 3000;
+// Endpoint to create a connection token
+app.post('/connection_token', async (req, res) => {
+    try {
+        const connectionToken = await stripe.terminal.connectionTokens.create();
+        res.json({ secret: connectionToken.secret });
+    } catch (error) {
+        console.error('Error creating connection token:', error.message);
+        res.status(500).json({
+            error: 'Error creating connection token',
+            message: error.message,
+        });
+    }
+});
 app.listen(PORT, () => console.log(`Server is running on http://localhost:${PORT}`));
